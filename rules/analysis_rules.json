@@ -1,0 +1,54 @@
+{
+  "version": "v1.0",
+  "source": "FDE实习生考试题库-04商机录入与分析助手",
+  "rules": [
+    {
+      "id": "OPP-01",
+      "category": "事实边界",
+      "requirement": "只将客户明确表达或可直接观察的信息写为事实。",
+      "enforcement": "confirmed字段必须包含非空值和直接证据"
+    },
+    {
+      "id": "OPP-02",
+      "category": "推断处理",
+      "requirement": "“可能、应该、感觉、挺感兴趣”等仅可作为推断或未确认信息，不能写成确定结论。",
+      "enforcement": "推测性表达不得生成confirmed状态"
+    },
+    {
+      "id": "OPP-03",
+      "category": "缺失信息",
+      "requirement": "未提供金额、姓名、时间、权限时，必须标注未确认，不得补全。",
+      "enforcement": "unconfirmed与cannot_determine状态的value必须为null"
+    },
+    {
+      "id": "OPP-04",
+      "category": "证据要求",
+      "requirement": "预算、决策人、时间计划、销售阶段必须保留原话或原始记录依据。",
+      "enforcement": "关键字段和阶段信号使用Evidence对象保存原文"
+    },
+    {
+      "id": "OPP-05",
+      "category": "矛盾处理",
+      "requirement": "客户前后表达矛盾时，需同时记录，标为风险或待确认，不得自行选择其中一种。",
+      "enforcement": "contradictory状态必须保留至少两个冲突值和双方证据"
+    },
+    {
+      "id": "OPP-06",
+      "category": "下一步行动",
+      "requirement": "必须写清动作、建议负责人、时间；未约定时间时标待确认。",
+      "enforcement": "NextAction强制action、owner、due_time和reason非空"
+    }
+  ],
+  "crm_fields": [
+    "客户需求",
+    "核心场景",
+    "预算",
+    "决策人",
+    "影响人",
+    "时间计划",
+    "商机阶段",
+    "风险",
+    "下一步行动",
+    "未确认信息"
+  ]
+}

@@ -1,0 +1,53 @@
+[
+  {
+    "stage": "S0",
+    "name": "线索",
+    "rank": 0,
+    "condition": "只有初步接触，无明确需求。",
+    "requirements": [],
+    "fallback": true
+  },
+  {
+    "stage": "S1",
+    "name": "需求初探",
+    "rank": 1,
+    "condition": "明确至少一个业务问题或使用场景。",
+    "requirements": [{"any_of": ["customer_needs", "core_scenarios"]}],
+    "fallback": false
+  },
+  {
+    "stage": "S2",
+    "name": "方案验证",
+    "rank": 2,
+    "condition": "客户明确同意演示、试用、技术交流或方案评估。",
+    "requirements": [{"any_of": ["validation_commitments"]}],
+    "fallback": false
+  },
+  {
+    "stage": "S3",
+    "name": "商务评估",
+    "rank": 3,
+    "condition": "已讨论预算、报价、采购流程或合同条款之一，且需求仍有效。",
+    "requirements": [
+      {"any_of": ["customer_needs", "core_scenarios"]},
+      {"any_of": ["commercial_discussions"]}
+    ],
+    "fallback": false
+  },
+  {
+    "stage": "S4",
+    "name": "决策审批",
+    "rank": 4,
+    "condition": "明确进入内部立项、审批或供应商决策。",
+    "requirements": [{"any_of": ["decision_progress"]}],
+    "fallback": false
+  },
+  {
+    "stage": "S5",
+    "name": "赢单/签约",
+    "rank": 5,
+    "condition": "已签合同或正式订单已确认。",
+    "requirements": [{"any_of": ["contract_or_order"]}],
+    "fallback": false
+  }
+]
