@@ -88,7 +88,7 @@ Agent 采用受控状态图：输入检查 -> 事实提取 -> 事实边界校验
 - 支持多轮补充、用户确认后保存、结构化 JSON 下载和一键重置。
 - 接口失败会保留上一次成功结果，并提供可重试提示。
 - 已通过真实豆包调用的页面回归，详细说明见 `docs/阶段八公开体验页面.md`。
-- 已部署公网直达入口：<https://feishu-opportunity-agent.streamlit.app/~/+/>。
+- 已部署公网入口：<https://feishu-opportunity-agent.streamlit.app/>。
 
 ## 已完成：阶段九
 
@@ -101,7 +101,7 @@ Agent 采用受控状态图：输入检查 -> 事实提取 -> 事实边界校验
 
 ## 阶段十：部署与面试交付
 
-- 面试官公开直达入口：<https://feishu-opportunity-agent.streamlit.app/~/+/>，无需 GitHub、Streamlit 或飞书登录。
+- 面试官公开入口：<https://feishu-opportunity-agent.streamlit.app/>，无需 GitHub、Streamlit 或飞书登录。
 - 已加入 Streamlit Community Cloud 所需的 Python 版本、主题和服务器配置。
 - 已增加公开环境会话限流，并保留 20～12,000 字输入硬限制。
 - 公开环境默认禁止飞书写入，避免外部访客污染企业数据；本地与受控环境仍可正常确认保存。
