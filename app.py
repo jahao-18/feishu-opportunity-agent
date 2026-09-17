@@ -245,15 +245,40 @@ def render_agent_controls(state: dict) -> None:
                 st.error(f"重新分析失败：{exc}")
 
     if control.decision == AgentDecision.READY_TO_SAVE:
-        if PUBLIC_POLICY.can_save_to_feishu:
-            st.warning("保存是有副作用操作。系统不会自动执行，需由你明确确认。")
-        else:
+        write_authorized = bool(st.session_state.get("feishu_write_authorized"))
+        can_save = PUBLIC_POLICY.can_attempt_feishu_save and (
+            not PUBLIC_POLICY.requires_write_code or write_authorized
+        )
+
+        if not PUBLIC_POLICY.can_attempt_feishu_save:
             st.info("公开演示环境已关闭飞书写入；分析、追问和 JSON 下载仍可正常体验。")
+        elif PUBLIC_POLICY.requires_write_code and not PUBLIC_POLICY.write_code_configured:
+            st.error("飞书写入口令尚未配置，当前按安全策略禁止公网写入。")
+        elif PUBLIC_POLICY.requires_write_code and not write_authorized:
+            st.info("输入面试演示口令后，才能将确认结果写入飞书多维表格。")
+            code_key = f"write_code_{state['request_id']}"
+            candidate = st.text_input(
+                "演示写入口令",
+                type="password",
+                key=code_key,
+                help="口令仅用于本次浏览器会话的飞书写入授权。",
+            )
+            if st.button("验证写入口令", use_container_width=True):
+                if PUBLIC_POLICY.authorize_feishu_save(candidate):
+                    st.session_state["feishu_write_authorized"] = True
+                    st.rerun()
+                else:
+                    st.error("写入口令错误，请检查后重试。")
+        else:
+            if PUBLIC_POLICY.requires_write_code:
+                st.success("本次会话已获得飞书写入权限。")
+            st.warning("保存是有副作用操作。系统不会自动执行，需由你明确确认。")
+
         if st.button(
             "确认保存到飞书多维表格",
             type="primary",
             use_container_width=True,
-            disabled=not PUBLIC_POLICY.can_save_to_feishu,
+            disabled=not can_save,
         ):
             try:
                 with st.spinner("正在写入飞书多维表格……"):
@@ -295,11 +320,12 @@ def run() -> None:
     with reset_col:
         if st.button("重置", help="清空本次结果并开始新的分析", use_container_width=True):
             for key in list(st.session_state):
-                if key.startswith("answer_") or key in {
+                if key.startswith(("answer_", "write_code_")) or key in {
                     "agent_state",
                     "customer_history",
                     "customer_history_request_id",
                     "analysis_error",
+                    "feishu_write_authorized",
                 }:
                     st.session_state.pop(key, None)
             st.rerun()

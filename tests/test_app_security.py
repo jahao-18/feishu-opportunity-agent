@@ -7,6 +7,7 @@ def policy(**overrides) -> PublicDemoPolicy:
         "analysis_limit": 2,
         "window_seconds": 60,
         "public_feishu_save_enabled": False,
+        "write_access_code": "",
     }
     values.update(overrides)
     return PublicDemoPolicy(**values)
@@ -36,6 +37,40 @@ def test_local_mode_does_not_consume_or_reject_quota():
 
 
 def test_public_save_is_disabled_by_default_policy():
-    assert not policy().can_save_to_feishu
-    assert policy(public_feishu_save_enabled=True).can_save_to_feishu
-    assert policy(enabled=False).can_save_to_feishu
+    assert not policy().can_attempt_feishu_save
+    assert policy(public_feishu_save_enabled=True).can_attempt_feishu_save
+    assert policy(enabled=False).can_attempt_feishu_save
+
+
+def test_public_save_requires_the_server_side_write_code():
+    guarded = policy(
+        public_feishu_save_enabled=True,
+        write_access_code="FDE-demo-code",
+    )
+
+    assert guarded.requires_write_code
+    assert guarded.write_code_configured
+    assert not guarded.authorize_feishu_save()
+    assert not guarded.authorize_feishu_save("wrong-code")
+    assert guarded.authorize_feishu_save("FDE-demo-code")
+
+
+def test_public_save_fails_closed_when_write_code_is_missing():
+    guarded = policy(public_feishu_save_enabled=True)
+
+    assert guarded.requires_write_code
+    assert not guarded.write_code_configured
+    assert not guarded.authorize_feishu_save("anything")
+
+
+def test_local_save_does_not_require_a_write_code():
+    assert policy(enabled=False).authorize_feishu_save()
+
+
+def test_policy_repr_does_not_expose_write_code():
+    guarded = policy(
+        public_feishu_save_enabled=True,
+        write_access_code="never-show-this",
+    )
+
+    assert "never-show-this" not in repr(guarded)

@@ -22,6 +22,11 @@ if ($missing.Count -gt 0) {
     throw "Missing required deployment variables: $($missing -join ', ')"
 }
 
+$publicSaveEnabled = $(if ($values['FEISHU_PUBLIC_SAVE_ENABLED']) { $values['FEISHU_PUBLIC_SAVE_ENABLED'] } else { 'false' })
+if ($publicSaveEnabled -match '^(?i:true|1|yes|on)$' -and [string]::IsNullOrWhiteSpace($values['DEMO_WRITE_CODE'])) {
+    throw 'DEMO_WRITE_CODE is required when FEISHU_PUBLIC_SAVE_ENABLED is true'
+}
+
 $deployment = [ordered]@{
     MOCK_MODE = 'false'
     ARK_API_KEY = $values['ARK_API_KEY']
@@ -43,7 +48,8 @@ $deployment = [ordered]@{
     PUBLIC_DEMO_MODE = 'true'
     ANALYSIS_RATE_LIMIT = '6'
     ANALYSIS_RATE_WINDOW_SECONDS = '600'
-    FEISHU_PUBLIC_SAVE_ENABLED = 'false'
+    FEISHU_PUBLIC_SAVE_ENABLED = $publicSaveEnabled
+    DEMO_WRITE_CODE = $values['DEMO_WRITE_CODE']
 }
 
 $lines = foreach ($entry in $deployment.GetEnumerator()) {

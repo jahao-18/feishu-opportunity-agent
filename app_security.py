@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hmac
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _truthy(value: str | None, default: bool = False) -> bool:
@@ -17,6 +18,7 @@ class PublicDemoPolicy:
     analysis_limit: int
     window_seconds: int
     public_feishu_save_enabled: bool
+    write_access_code: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls) -> "PublicDemoPolicy":
@@ -27,11 +29,30 @@ class PublicDemoPolicy:
             public_feishu_save_enabled=_truthy(
                 os.getenv("FEISHU_PUBLIC_SAVE_ENABLED"), default=False
             ),
+            write_access_code=os.getenv("DEMO_WRITE_CODE", "").strip(),
         )
 
     @property
-    def can_save_to_feishu(self) -> bool:
+    def can_attempt_feishu_save(self) -> bool:
         return not self.enabled or self.public_feishu_save_enabled
+
+    @property
+    def requires_write_code(self) -> bool:
+        return self.enabled and self.public_feishu_save_enabled
+
+    @property
+    def write_code_configured(self) -> bool:
+        return bool(self.write_access_code)
+
+    def authorize_feishu_save(self, candidate: str | None = None) -> bool:
+        """Fail closed for public writes unless the server-side code matches."""
+        if not self.can_attempt_feishu_save:
+            return False
+        if not self.enabled:
+            return True
+        if not self.write_access_code or not candidate:
+            return False
+        return hmac.compare_digest(candidate, self.write_access_code)
 
 
 def consume_analysis_quota(
