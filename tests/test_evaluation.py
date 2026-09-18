@@ -12,6 +12,7 @@ def result(**overrides) -> EvalResult:
         "stage_pass": True,
         "evidence_pass": True,
         "hallucination_pass": True,
+        "fact_pass": True,
         "unconfirmed_pass": True,
         "decision_pass": True,
         "input_guard_pass": True,
@@ -38,8 +39,42 @@ def test_dataset_covers_required_stage_and_robustness_categories():
         "S5",
     }
     categories = {case.category for case in cases}
-    for required in {"信息缺失", "信息矛盾", "模糊表达", "否定表达", "恶意提示词", "超长输入"}:
+    for required in {
+        "信息缺失",
+        "信息矛盾",
+        "模糊表达",
+        "否定表达",
+        "恶意提示词",
+        "超长输入",
+        "完整字段抽取",
+        "中英混合",
+        "口语噪声",
+        "第三方归属",
+    }:
         assert required in categories
+
+    fact_fields = {
+        "customer_name",
+        "customer_needs",
+        "core_scenarios",
+        "budget",
+        "decision_makers",
+        "influencers",
+        "timeline",
+        "validation_commitments",
+        "commercial_discussions",
+        "decision_progress",
+        "contract_or_order",
+    }
+    for case in cases:
+        asserted = (
+            set(case.required_confirmed)
+            | set(case.required_unconfirmed_fields)
+            | set(case.required_contradictory)
+            | set(case.value_contains)
+            | set(case.forbidden_confirmed)
+        )
+        assert asserted <= fact_fields
 
 
 def test_report_computes_quality_targets():
@@ -64,6 +99,32 @@ def test_report_excludes_input_rejections_from_model_quality_metrics():
     assert report.schema_pass_rate == 1
     assert report.stage_accuracy == 1
     assert report.average_latency_ms == 1000
+
+
+def test_report_separates_infrastructure_failures_from_model_quality_metrics():
+    failed = result(
+        case_id="EVAL-UNIT-INFRA",
+        actual_stage="执行失败",
+        schema_pass=False,
+        stage_pass=False,
+        evidence_pass=False,
+        hallucination_pass=False,
+        fact_pass=False,
+        unconfirmed_pass=False,
+        decision_pass=False,
+        input_guard_pass=False,
+        passed=False,
+        latency_ms=30_000,
+        failures=["RateLimitError: 429"],
+    )
+    report = build_report([result(latency_ms=1000), failed], mode="live", batch_id="batch")
+
+    assert report.output_count == 1
+    assert report.execution_failure_count == 1
+    assert report.schema_pass_rate == 1
+    assert report.stage_accuracy == 1
+    assert report.average_latency_ms == 1000
+    assert not report.targets_met["execution_failures_zero"]
 
 
 def test_mock_fallback_resists_prompt_injection(monkeypatch):

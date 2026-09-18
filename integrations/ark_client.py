@@ -99,6 +99,7 @@ class ArkExtractor:
                     OpportunityFacts.model_validate(raw_payload),
                     source_note=model_note,
                 )
+                facts = self._ground_model_evidence(facts, source_note=model_note)
                 return ExtractionResult(
                     facts=facts,
                     metadata=ModelMetadata(
@@ -254,7 +255,11 @@ class ArkExtractor:
 
     @staticmethod
     def _sentences(note: str) -> list[str]:
-        return [s.strip() for s in re.split(r"[。！？\n；]", note) if s.strip()]
+        return [
+            s.strip()
+            for s in re.split(r"[。！？\n；]|[.!?](?=\s|$)", note)
+            if s.strip()
+        ]
 
     @classmethod
     def _sanitize_untrusted_note(cls, note: str) -> str:
@@ -264,6 +269,10 @@ class ArkExtractor:
             r"不要保留证据",
             r"伪造",
             r"请把.{0,30}写成",
+            r"\b(?:system|assistant|developer)\s*:",
+            r"\bignore\b.{0,60}\b(?:instruction|instructions|rules|previous)\b",
+            r"\b(?:fabricate|forge|fake)\b",
+            r"\bmark\b.{0,40}\b(?:contract|order)\b.{0,30}\b(?:signed|confirmed)\b",
         ]
         safe_sentences = [
             sentence
@@ -271,6 +280,61 @@ class ArkExtractor:
             if not any(re.search(pattern, sentence, re.IGNORECASE) for pattern in injection_patterns)
         ]
         return "。".join(safe_sentences) or "无可提取的客户业务事实。"
+
+    @classmethod
+    def _ground_model_evidence(
+        cls,
+        facts: OpportunityFacts,
+        *,
+        source_note: str,
+    ) -> OpportunityFacts:
+        """Keep model evidence verbatim; fail closed when it cannot be grounded."""
+        source_sentences = cls._sentences(source_note)
+
+        def grounded_quote(quote: str) -> str | None:
+            if quote in source_note:
+                return quote
+            fragments = [
+                part.strip()
+                for part in re.split(r"(?:\.{3,}|…+)", quote)
+                if len(part.strip()) >= 2
+            ]
+            matches = [
+                sentence
+                for sentence in source_sentences
+                if fragments and all(fragment in sentence for fragment in fragments)
+            ]
+            return matches[0] if len(matches) == 1 else None
+
+        for field_name in type(facts).model_fields:
+            fact = getattr(facts, field_name)
+            grounded: list[Evidence] = []
+            for item in fact.evidence:
+                if item.source != "visit_note":
+                    grounded.append(item)
+                    continue
+                quote = grounded_quote(item.quote)
+                if quote:
+                    grounded.append(Evidence(quote=quote, source=item.source))
+
+            loses_required_evidence = (
+                fact.status == FactStatus.CONFIRMED and not grounded
+            ) or (
+                fact.status == FactStatus.CONTRADICTORY and len(grounded) < 2
+            )
+            if loses_required_evidence:
+                setattr(
+                    facts,
+                    field_name,
+                    EvidenceBackedFact(
+                        status=FactStatus.UNCONFIRMED,
+                        evidence=grounded,
+                        note="模型证据无法逐字定位回原文，已按安全策略降级为未确认。",
+                    ),
+                )
+            else:
+                setattr(facts, field_name, fact.model_copy(update={"evidence": grounded}))
+        return facts
 
     @classmethod
     def _enforce_fact_polarity(

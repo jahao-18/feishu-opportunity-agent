@@ -27,6 +27,7 @@ DEFAULT_OUTPUT_DIR = ROOT / "evals" / "results"
 EVAL_EXTRA_FIELDS = {
     "类别": 1,
     "Schema通过": 7,
+    "字段抽取正确": 7,
     "未确认正确": 7,
     "模型版本": 1,
     "Prompt版本": 1,
@@ -47,6 +48,10 @@ class EvalCase(BaseModel):
     expect_error: bool = False
     required_unconfirmed: list[str] = Field(default_factory=list)
     forbidden_confirmed: list[str] = Field(default_factory=list)
+    required_confirmed: list[str] = Field(default_factory=list)
+    required_unconfirmed_fields: list[str] = Field(default_factory=list)
+    required_contradictory: list[str] = Field(default_factory=list)
+    value_contains: dict[str, list[str]] = Field(default_factory=dict)
     expected_decision: AgentDecision | None = None
 
     @property
@@ -64,6 +69,7 @@ class EvalResult(BaseModel):
     stage_pass: bool
     evidence_pass: bool
     hallucination_pass: bool
+    fact_pass: bool
     unconfirmed_pass: bool
     decision_pass: bool
     input_guard_pass: bool
@@ -81,12 +87,14 @@ class EvalReport(BaseModel):
     mode: str
     case_count: int
     output_count: int
+    execution_failure_count: int
     passed_count: int
     pass_rate: float
     schema_pass_rate: float
     stage_accuracy: float
     evidence_pass_rate: float
     hallucination_rate: float
+    fact_accuracy: float
     average_latency_ms: int
     p95_latency_ms: int
     targets_met: dict[str, bool]
@@ -104,6 +112,35 @@ def _evidence_is_grounded(analysis: OpportunityAnalysis, source: str) -> bool:
             if evidence.source == "visit_note" and evidence.quote not in source:
                 return False
     return all(item.quote in source for item in analysis.stage_evidence)
+
+
+def _fact_value_text(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(str(item) for item in value)
+    return "" if value is None else str(value)
+
+
+def _check_fact_expectations(case: EvalCase, analysis: OpportunityAnalysis) -> list[str]:
+    failures: list[str] = []
+    for field_name in case.required_confirmed:
+        if not getattr(analysis.facts, field_name).is_confirmed:
+            failures.append(f"字段 {field_name} 未被正确确认为事实")
+    for field_name in case.required_unconfirmed_fields:
+        status = getattr(analysis.facts, field_name).status.value
+        if status not in {"unconfirmed", "cannot_determine"}:
+            failures.append(f"字段 {field_name} 应保持未确认，实际为 {status}")
+    for field_name in case.required_contradictory:
+        status = getattr(analysis.facts, field_name).status.value
+        if status != "contradictory":
+            failures.append(f"字段 {field_name} 应标记矛盾，实际为 {status}")
+    for field_name, fragments in case.value_contains.items():
+        value_text = _fact_value_text(getattr(analysis.facts, field_name).value).casefold()
+        missing = [fragment for fragment in fragments if fragment.casefold() not in value_text]
+        if missing:
+            failures.append(
+                f"字段 {field_name} 的值缺少关键信息：{'、'.join(missing)}"
+            )
+    return failures
 
 
 def evaluate_case(case: EvalCase) -> EvalResult:
@@ -126,12 +163,12 @@ def evaluate_case(case: EvalCase) -> EvalResult:
         failures.append("输入校验结果与预期不一致")
 
     if case.expect_error:
-        stage_pass = evidence_pass = hallucination_pass = unconfirmed_pass = decision_pass = True
+        stage_pass = evidence_pass = hallucination_pass = fact_pass = unconfirmed_pass = decision_pass = True
         actual_stage = "输入拒绝" if has_error else (analysis.stage if analysis else "执行失败")
         model_version = "input_guard"
         stage_rule_version = risk_rule_version = "未执行"
     elif analysis is None:
-        stage_pass = evidence_pass = hallucination_pass = unconfirmed_pass = decision_pass = False
+        stage_pass = evidence_pass = hallucination_pass = fact_pass = unconfirmed_pass = decision_pass = False
         actual_stage = "执行失败"
         model_version = stage_rule_version = risk_rule_version = "未知"
         failures.append("未生成可校验的 OpportunityAnalysis")
@@ -149,6 +186,9 @@ def evaluate_case(case: EvalCase) -> EvalResult:
         )
         if not hallucination_pass:
             failures.append("禁止确认的字段被确认为事实或证据越界")
+        fact_failures = _check_fact_expectations(case, analysis)
+        fact_pass = not fact_failures
+        failures.extend(fact_failures)
         actual_unconfirmed = set(analysis.unconfirmed_information)
         unconfirmed_pass = set(case.required_unconfirmed).issubset(actual_unconfirmed)
         if not unconfirmed_pass:
@@ -171,6 +211,7 @@ def evaluate_case(case: EvalCase) -> EvalResult:
             stage_pass,
             evidence_pass,
             hallucination_pass,
+            fact_pass,
             unconfirmed_pass,
             decision_pass,
         ]
@@ -185,6 +226,7 @@ def evaluate_case(case: EvalCase) -> EvalResult:
         stage_pass=stage_pass,
         evidence_pass=evidence_pass,
         hallucination_pass=hallucination_pass,
+        fact_pass=fact_pass,
         unconfirmed_pass=unconfirmed_pass,
         decision_pass=decision_pass,
         input_guard_pass=input_guard_pass,
@@ -202,32 +244,38 @@ def _rate(values: list[bool]) -> float:
 
 
 def build_report(results: list[EvalResult], *, mode: str, batch_id: str) -> EvalReport:
-    output_results = [item for item in results if item.actual_stage != "输入拒绝"]
-    stage_results = [item for item in results if item.expected_stage.startswith("S")]
+    output_results = [item for item in results if item.actual_stage.startswith("S")]
+    execution_failures = [item for item in results if item.actual_stage == "执行失败"]
+    stage_results = [item for item in output_results if item.expected_stage.startswith("S")]
     latencies = sorted(item.latency_ms for item in output_results)
     p95_index = max(0, math.ceil(len(latencies) * 0.95) - 1)
     schema_rate = _rate([item.schema_pass for item in output_results])
     stage_accuracy = _rate([item.stage_pass for item in stage_results])
     evidence_rate = _rate([item.evidence_pass for item in output_results])
     hallucination_rate = 1 - _rate([item.hallucination_pass for item in output_results])
+    fact_accuracy = _rate([item.fact_pass for item in output_results])
     return EvalReport(
         batch_id=batch_id,
         mode=mode,
         case_count=len(results),
         output_count=len(output_results),
+        execution_failure_count=len(execution_failures),
         passed_count=sum(item.passed for item in results),
         pass_rate=_rate([item.passed for item in results]),
         schema_pass_rate=schema_rate,
         stage_accuracy=stage_accuracy,
         evidence_pass_rate=evidence_rate,
         hallucination_rate=hallucination_rate,
+        fact_accuracy=fact_accuracy,
         average_latency_ms=int(statistics.mean(latencies)) if latencies else 0,
         p95_latency_ms=latencies[p95_index] if latencies else 0,
         targets_met={
             "schema_100_percent": schema_rate == 1.0,
             "stage_accuracy_at_least_90_percent": stage_accuracy >= 0.9,
             "hallucination_rate_zero": hallucination_rate == 0,
+            "fact_accuracy_at_least_90_percent": fact_accuracy >= 0.9,
             "average_latency_below_15_seconds": bool(latencies) and statistics.mean(latencies) < 15_000,
+            "execution_failures_zero": not execution_failures,
         },
         results=results,
     )
@@ -286,6 +334,7 @@ def sync_report_to_feishu(report: EvalReport) -> list[str]:
             "实际阶段": item.actual_stage,
             "是否编造": not item.hallucination_pass,
             "是否保留证据": item.evidence_pass,
+            "字段抽取正确": item.fact_pass,
             "Schema通过": item.schema_pass,
             "未确认正确": item.unconfirmed_pass,
             "是否通过": item.passed,
@@ -332,12 +381,15 @@ def main() -> int:
     path = save_report(report)
     print(f"batch_id={report.batch_id}")
     print(f"cases={report.case_count}")
+    print(f"successful_outputs={report.output_count}")
+    print(f"execution_failures={report.execution_failure_count}")
     print(f"passed={report.passed_count}")
     print(f"pass_rate={report.pass_rate:.1%}")
     print(f"schema_pass_rate={report.schema_pass_rate:.1%}")
     print(f"stage_accuracy={report.stage_accuracy:.1%}")
     print(f"evidence_pass_rate={report.evidence_pass_rate:.1%}")
     print(f"hallucination_rate={report.hallucination_rate:.1%}")
+    print(f"fact_accuracy={report.fact_accuracy:.1%}")
     print(f"average_latency_ms={report.average_latency_ms}")
     print(f"p95_latency_ms={report.p95_latency_ms}")
     print(f"report={path}")
